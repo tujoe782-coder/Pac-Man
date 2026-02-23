@@ -73,8 +73,8 @@
     
     // Game constants
     const TILE_SIZE = 20;
-    const COLS = 28;
-    const ROWS = 31;
+    let COLS = 28;
+    let ROWS = 31;
     const PACMAN_SPEED = 2;
     const GHOST_SPEED = 2;
     const POWER_PELLET_DURATION = 8000;
@@ -125,9 +125,44 @@
       ],
     ];
     
-    // Use first map
-    let gameMap = JSON.parse(JSON.stringify(LEVEL_MAPS[0]));
-    let originalMap = JSON.parse(JSON.stringify(LEVEL_MAPS[0]));
+    function cloneMap(map) {
+      return JSON.parse(JSON.stringify(map));
+    }
+
+    function normalizeMap(rawMap) {
+      const cols = Math.max(...rawMap.map(row => row.length));
+      return rawMap.map((row) => {
+        if (row.length === cols) return [...row];
+        // Pad short rows with walls to keep maze boundaries valid
+        return [...row, ...Array(cols - row.length).fill(1)];
+      });
+    }
+
+    function createLevelMaps(rawMaps) {
+      const normalized = rawMaps.map(normalizeMap);
+
+      // Ensure at least 3 playable levels (same maze, increasing speed per level)
+      while (normalized.length < 3) {
+        normalized.push(cloneMap(normalized[normalized.length - 1]));
+      }
+
+      return normalized;
+    }
+
+    const LEVEL_MAPS_NORMALIZED = createLevelMaps(LEVEL_MAPS);
+    COLS = LEVEL_MAPS_NORMALIZED[0][0].length;
+    ROWS = LEVEL_MAPS_NORMALIZED[0].length;
+    canvas.width = COLS * TILE_SIZE;
+    canvas.height = ROWS * TILE_SIZE;
+    document.getElementById('scoreBoard').style.width = `${canvas.width}px`;
+
+    function getMapForLevel(targetLevel) {
+      const index = Math.min(Math.max(targetLevel - 1, 0), LEVEL_MAPS_NORMALIZED.length - 1);
+      return LEVEL_MAPS_NORMALIZED[index];
+    }
+
+    let gameMap = cloneMap(getMapForLevel(1));
+    let originalMap = cloneMap(getMapForLevel(1));
     
     // Directions
     const DIRECTIONS = {
@@ -139,9 +174,10 @@
     };
     
     // Pac-Man
+    const PACMAN_START = { x: 14, y: 15 };
     const pacman = {
-      x: 14 * TILE_SIZE,
-      y: 23 * TILE_SIZE,
+      x: PACMAN_START.x * TILE_SIZE,
+      y: PACMAN_START.y * TILE_SIZE,
       direction: DIRECTIONS.STOP,
       nextDirection: DIRECTIONS.STOP,
       radius: 8,
@@ -227,7 +263,8 @@
           if (dist > 8 * TILE_SIZE) {
             target = { x: pacman.x, y: pacman.y };
           } else {
-            target = { x: 1 * TILE_SIZE, y: 31 * TILE_SIZE };
+            // Retreat to lower-left area within maze bounds
+            target = { x: 1 * TILE_SIZE, y: Math.max(1, ROWS - 11) * TILE_SIZE };
           }
         }
         
@@ -373,10 +410,10 @@
     }
     
     const ghosts = [
-      new Ghost('Blinky', 14, 11),
-      new Ghost('Pinky', 12, 14),
-      new Ghost('Inky', 14, 14),
-      new Ghost('Clyde', 16, 14)
+      new Ghost('Blinky', 13, 11),
+      new Ghost('Pinky', 14, 11),
+      new Ghost('Inky', 12, 12),
+      new Ghost('Clyde', 15, 12)
     ];
     
     // Initialize game
@@ -433,20 +470,22 @@
       score = 0;
       lives = 3;
       level = 1;
-      gameMap = JSON.parse(JSON.stringify(originalMap));
+      originalMap = cloneMap(getMapForLevel(1));
+      gameMap = cloneMap(originalMap);
       resetPositions();
       updateUI();
     }
     
     function resetLevel() {
-      gameMap = JSON.parse(JSON.stringify(originalMap));
+      originalMap = cloneMap(getMapForLevel(level));
+      gameMap = cloneMap(originalMap);
       resetPositions();
       updateUI();
     }
     
     function resetPositions() {
-      pacman.x = 14 * TILE_SIZE;
-      pacman.y = 23 * TILE_SIZE;
+      pacman.x = PACMAN_START.x * TILE_SIZE;
+      pacman.y = PACMAN_START.y * TILE_SIZE;
       pacman.direction = DIRECTIONS.STOP;
       pacman.nextDirection = DIRECTIONS.STOP;
       
@@ -588,9 +627,11 @@
     }
     
     function checkCollisions() {
-      ghosts.forEach(ghost => {
+      if (gameState !== 'playing') return;
+
+      for (const ghost of ghosts) {
         const dist = Math.hypot(pacman.x - ghost.x, pacman.y - ghost.y);
-        
+
         if (dist < TILE_SIZE) {
           if (ghost.scared && !ghost.dead) {
             // Eat ghost
@@ -599,11 +640,12 @@
             score += 200;
             updateUI();
           } else if (!ghost.dead) {
-            // Pac-Man dies
+            // Pac-Man dies (stop checking this frame)
             handleDeath();
+            return;
           }
         }
-      });
+      }
     }
     
     function handleDeath() {
@@ -644,7 +686,7 @@
       
       if (!hasPellets) {
         level++;
-        if (level > 3) {
+        if (level > LEVEL_MAPS_NORMALIZED.length) {
           gameState = 'win';
         } else {
           resetLevel();
